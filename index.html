@@ -88,12 +88,9 @@
     border-radius: 14px;
     overflow: hidden;
     box-shadow: 0 4px 24px rgba(0,0,0,0.13);
-    cursor: pointer;
     position: relative;
     background: #fff;
-    transition: transform 0.15s ease;
   }
-  .catalog-card:active { transform: scale(0.97); }
 
   .card-label {
     position: absolute; top: 0; left: 0; right: 0;
@@ -117,66 +114,6 @@
     display: block;
     margin-top: 30px;
   }
-
-  /* ── FULLSCREEN ── */
-  #fs-overlay {
-    position: fixed; inset: 0; z-index: 100;
-    background: rgba(0,0,0,0);
-    pointer-events: none;
-    transition: background 0.28s ease;
-    display: flex; flex-direction: column;
-  }
-  #fs-overlay.open {
-    background: rgba(0,0,0,0.96);
-    pointer-events: auto;
-  }
-
-  #fs-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px 8px;
-    padding-top: max(12px, env(safe-area-inset-top));
-    opacity: 0; transition: opacity 0.28s;
-  }
-  #fs-overlay.open #fs-header { opacity: 1; }
-
-  #fs-title {
-    font-size: 0.75rem; font-weight: 700;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    color: rgba(255,255,255,0.6);
-  }
-  #fs-close {
-    font-size: 1.4rem; color: rgba(255,255,255,0.7);
-    background: none; border: none; cursor: pointer;
-    padding: 4px 8px; line-height: 1;
-  }
-
-  #fs-image-wrap {
-    flex: 1;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden;
-    opacity: 0; transition: opacity 0.28s;
-  }
-  #fs-overlay.open #fs-image-wrap { opacity: 1; }
-
-  #fs-img {
-    max-width: 100%;
-    max-height: 100%;
-    width: auto; height: auto;
-    object-fit: contain;
-    display: block;
-    cursor: crosshair;
-    touch-action: none;
-  }
-
-  #fs-hint {
-    text-align: center;
-    color: rgba(255,255,255,0.3);
-    font-size: 0.68rem;
-    letter-spacing: 0.06em;
-    padding: 6px 0 10px;
-    opacity: 0; transition: opacity 0.28s;
-  }
-  #fs-overlay.open #fs-hint { opacity: 1; }
 
   /* ── RESULT TOAST ── */
   #toast {
@@ -242,18 +179,6 @@
 <section id="panel-catalog" class="panel">
   <div id="carousel"></div>
 </section>
-
-<!-- FULLSCREEN OVERLAY -->
-<div id="fs-overlay">
-  <div id="fs-header">
-    <span id="fs-title"></span>
-    <button id="fs-close">✕</button>
-  </div>
-  <div id="fs-image-wrap">
-    <img id="fs-img" src="" alt="">
-  </div>
-  <div id="fs-hint">Tap any color swatch</div>
-</div>
 
 <!-- TOAST -->
 <div id="toast">
@@ -605,7 +530,7 @@ function textColor(r, g, b) {
 /* ─── BUILD CAROUSEL ─── */
 const carousel = document.getElementById('carousel');
 
-CATALOG.forEach((spread, idx) => {
+CATALOG.forEach((spread) => {
   const card = document.createElement('div');
   card.className = 'catalog-card';
 
@@ -621,81 +546,58 @@ CATALOG.forEach((spread, idx) => {
 
   card.appendChild(label);
   card.appendChild(img);
-  card.addEventListener('click', () => openFullscreen(idx));
+
+  // Tap vs swipe detection
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  img.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  img.addEventListener('touchend', (e) => {
+    const dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+    const dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+    // Only treat as tap if finger barely moved (not a swipe)
+    if (dx < 10 && dy < 10) {
+      e.preventDefault();
+      handleCardTap(e.changedTouches[0], img, spread);
+    }
+  }, { passive: false });
+
   carousel.appendChild(card);
 });
 
-/* ─── FULLSCREEN ─── */
-const fsOverlay = document.getElementById('fs-overlay');
-const fsImg     = document.getElementById('fs-img');
-const fsTitle   = document.getElementById('fs-title');
+function handleCardTap(touch, img, spread) {
+  const rect = img.getBoundingClientRect();
+  const natW = img.naturalWidth  || 1;
+  const natH = img.naturalHeight || 1;
 
-let currentSpread = null;
+  // object-fit: cover; object-position: top center
+  const scale     = Math.max(rect.width / natW, rect.height / natH);
+  const renderedW = natW * scale;
+  const renderedH = natH * scale;
+  const offsetX   = (rect.width - renderedW) / 2; // centered horizontally
+  const offsetY   = 0;                             // top-aligned
 
-function openFullscreen(idx) {
-  currentSpread = CATALOG[idx];
-  fsImg.src = currentSpread.src;
-  fsTitle.textContent = currentSpread.label;
-  fsOverlay.classList.add('open');
-}
+  const tapX = touch.clientX - rect.left;
+  const tapY = touch.clientY - rect.top;
 
-function closeFullscreen() {
-  fsOverlay.classList.remove('open');
-  hideToast();
-}
+  const relX = (tapX - offsetX) / renderedW;
+  const relY = (tapY - offsetY) / renderedH;
 
-document.getElementById('fs-close').addEventListener('click', closeFullscreen);
-
-fsImg.addEventListener('click', handleImageTap);
-
-function handleImageTap(e) {
-  if (!currentSpread) return;
-  e.stopPropagation();
-
-  // Get the actual rendered image bounds (accounts for object-fit: contain letterboxing)
-  const wrap    = document.getElementById('fs-image-wrap');
-  const wRect   = wrap.getBoundingClientRect();
-  const natW    = fsImg.naturalWidth  || 1;
-  const natH    = fsImg.naturalHeight || 1;
-  const natAR   = natW / natH;
-  const boxAR   = wRect.width / wRect.height;
-
-  let imgLeft, imgTop, imgW, imgH;
-  if (natAR > boxAR) {
-    // Width-constrained
-    imgW    = wRect.width;
-    imgH    = wRect.width / natAR;
-    imgLeft = wRect.left;
-    imgTop  = wRect.top + (wRect.height - imgH) / 2;
-  } else {
-    // Height-constrained
-    imgH    = wRect.height;
-    imgW    = wRect.height * natAR;
-    imgTop  = wRect.top;
-    imgLeft = wRect.left + (wRect.width - imgW) / 2;
-  }
-
-  const relX = (e.clientX - imgLeft) / imgW;
-  const relY = (e.clientY - imgTop)  / imgH;
-
-  // Guard: tap was outside image area
   if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return;
 
-  // Which column?
-  const colIdx = relX < 0.5 ? 0 : 1;
-  const col = currentSpread.cols[colIdx];
-
-  // Map Y to swatch index
+  const colIdx     = relX < 0.5 ? 0 : 1;
+  const col        = spread.cols[colIdx];
   const activeFrac = 1 - TOP_FRAC - BOT_FRAC;
   const swatchY    = (relY - TOP_FRAC) / activeFrac;
   const rawIdx     = Math.floor(swatchY * col.codes.length);
   const swatchIdx  = Math.max(0, Math.min(col.codes.length - 1, rawIdx));
 
   const code = col.codes[swatchIdx];
-  const tray = col.tray;
-  const name = NAMES[code] || '';
-
-  showToast(code, tray, name);
+  showToast(code, col.tray, NAMES[code] || '');
 }
 
 /* ─── TOAST ─── */
