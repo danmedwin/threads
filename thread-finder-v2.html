@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Thread Finder</title>
+<style>
+  :root {
+    --tab-h: 58px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --bg: #F7F4F0;
+    --text: #1C1A18;
+    --muted: rgba(28,26,24,0.42);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    background: var(--bg); color: var(--text);
+    transition: background 0.4s, color 0.4s;
+  }
+
+  /* ── PANELS ── */
+  .panel {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    bottom: calc(var(--tab-h) + var(--safe-b));
+    display: none; overflow: hidden;
+  }
+  .panel.active { display: flex; flex-direction: column; }
+
+  /* ── LOOKUP ── */
+  #panel-lookup {
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.5rem 1rem;
+  }
+  .lookup-eyebrow {
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; opacity: 0.45; margin-bottom: 2.8rem;
+  }
+  .input-wrap { width: 100%; max-width: 240px; margin-bottom: 3rem; }
+  #colorInput {
+    width: 100%; font-size: 3.2rem; font-weight: 700;
+    text-align: center; border: none; border-bottom: 2px solid currentColor;
+    background: transparent; color: inherit; padding: 0.2rem 0;
+    outline: none; letter-spacing: 0.1em;
+    -moz-appearance: textfield; appearance: textfield; caret-color: currentColor;
+  }
+  #colorInput::-webkit-inner-spin-button,
+  #colorInput::-webkit-outer-spin-button { -webkit-appearance: none; }
+  #colorInput::placeholder { opacity: 0.22; font-weight: 400; }
+  #lookup-result {
+    text-align: center; min-height: 8rem;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 3px;
+  }
+  .res-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.5; }
+  .res-tray { font-size: 7.5rem; font-weight: 800; line-height: 0.95; letter-spacing: -0.03em; }
+  .res-name { font-size: 0.9rem; font-style: italic; opacity: 0.6; margin-top: 6px; }
+  .res-nocolor { font-size: 0.72rem; opacity: 0.38; margin-top: 5px; }
+  .res-notfound { font-size: 1.2rem; font-weight: 500; opacity: 0.38; }
+
+  /* ── CATALOG ── */
+  #panel-catalog { display: none; flex-direction: column; }
+  #panel-catalog.active { display: flex; }
+
+  #carousel {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    overflow-x: scroll;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 12px;
+    padding: 16px 10vw;
+  }
+  #carousel::-webkit-scrollbar { display: none; }
+
+  .catalog-card {
+    flex: 0 0 80vw;
+    scroll-snap-align: center;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.13);
+    cursor: pointer;
+    position: relative;
+    background: #fff;
+    transition: transform 0.15s ease;
+  }
+  .catalog-card:active { transform: scale(0.97); }
+
+  .card-label {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 7px 10px 6px;
+    font-size: 0.62rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(28,26,24,0.55);
+    background: rgba(255,255,255,0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    text-align: center;
+    border-bottom: 1px solid rgba(0,0,0,0.07);
+    z-index: 2;
+  }
+
+  .card-img {
+    width: 100%;
+    height: calc(100dvh - var(--tab-h) - var(--safe-b) - 80px);
+    object-fit: cover;
+    object-position: top;
+    display: block;
+    margin-top: 30px;
+  }
+
+  /* ── FULLSCREEN ── */
+  #fs-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0);
+    pointer-events: none;
+    transition: background 0.28s ease;
+    display: flex; flex-direction: column;
+  }
+  #fs-overlay.open {
+    background: rgba(0,0,0,0.96);
+    pointer-events: auto;
+  }
+
+  #fs-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px 8px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    opacity: 0; transition: opacity 0.28s;
+  }
+  #fs-overlay.open #fs-header { opacity: 1; }
+
+  #fs-title {
+    font-size: 0.75rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+  }
+  #fs-close {
+    font-size: 1.4rem; color: rgba(255,255,255,0.7);
+    background: none; border: none; cursor: pointer;
+    padding: 4px 8px; line-height: 1;
+  }
+
+  #fs-image-wrap {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    opacity: 0; transition: opacity 0.28s;
+  }
+  #fs-overlay.open #fs-image-wrap { opacity: 1; }
+
+  #fs-img {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto; height: auto;
+    object-fit: contain;
+    display: block;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  #fs-hint {
+    text-align: center;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    padding: 6px 0 10px;
+    opacity: 0; transition: opacity 0.28s;
+  }
+  #fs-overlay.open #fs-hint { opacity: 1; }
+
+  /* ── RESULT TOAST ── */
+  #toast {
+    position: fixed;
+    bottom: calc(var(--tab-h) + var(--safe-b) + 16px);
+    left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px 28px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+    text-align: center;
+    z-index: 200;
+    opacity: 0;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    pointer-events: none;
+    min-width: 180px;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .toast-code { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .toast-tray-label { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+  .toast-tray-num { font-size: 3.8rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: var(--text); }
+  .toast-name { font-size: 0.8rem; font-style: italic; color: var(--muted); margin-top: 2px; }
+
+  /* ── TAB BAR ── */
+  #tab-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: calc(var(--tab-h) + var(--safe-b));
+    padding-bottom: var(--safe-b);
+    display: flex; z-index: 60;
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    background: rgba(247,244,240,0.82);
+    border-top: 1px solid rgba(0,0,0,0.09);
+    transition: background 0.4s;
+  }
+  .tab-btn {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 4px;
+    border: none; background: transparent; cursor: pointer;
+    color: var(--muted); transition: color 0.2s; padding: 0;
+  }
+  .tab-btn.active { color: var(--text); }
+  .tab-icon { font-size: 1.15rem; font-weight: 700; }
+  .tab-label { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<!-- LOOKUP -->
+<section id="panel-lookup" class="panel active">
+  <p class="lookup-eyebrow">Madeira Polyneon</p>
+  <div class="input-wrap">
+    <input type="number" id="colorInput" inputmode="numeric"
+      pattern="[0-9]*" placeholder="1500" autocomplete="off" autofocus>
+  </div>
+  <div id="lookup-result"></div>
+</section>
+
+<!-- CATALOG -->
+<section id="panel-catalog" class="panel">
+  <div id="carousel"></div>
+</section>
+
+<!-- FULLSCREEN OVERLAY -->
+<div id="fs-overlay">
+  <div id="fs-header">
+    <span id="fs-title"></span>
+    <button id="fs-close">✕</button>
+  </div>
+  <div id="fs-image-wrap">
+    <img id="fs-img" src="" alt="">
+  </div>
+  <div id="fs-hint">Tap any color swatch</div>
+</div>
+
+<!-- TOAST -->
+<div id="toast">
+  <div class="toast-code" id="toast-code"></div>
+  <div class="toast-tray-label">Tray</div>
+  <div class="toast-tray-num" id="toast-tray"></div>
+  <div class="toast-name" id="toast-name"></div>
+</div>
+
+<!-- TAB BAR -->
+<nav id="tab-bar">
+  <button class="tab-btn active" data-tab="lookup">
+    <span class="tab-icon">#</span>
+    <span class="tab-label">Lookup</span>
+  </button>
+  <button class="tab-btn" data-tab="catalog">
+    <span class="tab-icon">⊞</span>
+    <span class="tab-label">Catalog</span>
+  </button>
+</nav>
+
+<script>
+/* ─── CATALOG DATA ─── */
+/* Each image has two columns. Codes are listed top-to-bottom as they appear.
+   topFrac / botFrac are the fractional margins at top/bottom of the swatch area. */
+
+const CATALOG = [
+  {
+    src: '1-2.jpg', label: 'Trays 1 & 2',
+    cols: [
+      { tray: 1, codes: [1727,1623,1924,1866,1735,1724,1561,1666,1661,1622,1861,1683,1980,1971,1624,1772,1771,1625,1725,1869,1763,1626,1951,1955,1825] },
+      { tray: 2, codes: [1826,1923,1755,1965,1765,1621,1521,1853,1882,1752,1778,1678,1987,1878,1588,1637,1838,1839,1747,1653,1817,1820,1952,1821,1899] }
+    ]
+  },
+  {
+    src: '3-4.jpg', label: 'Trays 3 & 4',
+    cols: [
+      { tray: 3, codes: [1734,1754,1819,1777,1779,1982,1638,1974,1639,1616,1915,1620,1707,1781,1981,1784,1567,1919,1917,1713,1818,1941,1998,1887,1983] },
+      { tray: 4, codes: [1508,1509,1986,1681,1994,1948,1816,1815,1786,1910,1993,1909,1548,1721,1584,1984,1549,1921,1990,1787,1783,1785,1835,1782,1635] }
+    ]
+  },
+  {
+    src: '5-6.jpg', label: 'Trays 5 & 6',
+    cols: [
+      { tray: 5, codes: [1709,1710,1788,1833,1633,1880,1631,1831,1712,1911,1834,1680,1719,1720,1789,1731,1711,1832,1922,1522,1634,1553,1630,1933,1722] },
+      { tray: 6, codes: [1629,1529,1627,1632,1997,1766,1930,1943,1767,1743,1966,1566,1830,1676,1642,1532,1842,1843,1967,1555,1844,1976,1944,1843,1574] }
+    ]
+  },
+  {
+    src: '7-8.jpg', label: 'Trays 7 & 8',
+    cols: [
+      { tray: 7, codes: [1874,1562,1542,1531,1975,1742,1934,1829,1733,1528,1675,1674,1953,1871,1828,1775,1776,1764,1671,1628,1550,1960,1961,1964,1963] },
+      { tray: 8, codes: [1563,1761,1760,1962,1932,1827,1593,1977,1797,1762,1852,1992,1893,1895,1695,1896,1577,1594,1694,1892,1888,1846,1890,1991,1891] }
+    ]
+  },
+  {
+    src: '9-10.jpg', label: 'Trays 9 & 10',
+    cols: [
+      { tray: 9,  codes: [1645,1799,1685,1677,1746,1692,1592,1652,1690,1996,1704,1985,1879,1847,1868,1780,1849,1979,1647,1989,1751,1750,1845,1580,1703] },
+      { tray: 10, codes: [1770,1748,1848,1701,1650,1749,1988,1851,1651,1702,1900,1545,1578,1903,1902,1904,1970,1968,1648,1768,1541,1940,1649,1769,1905] }
+    ]
+  },
+  {
+    src: '11-12.jpg', label: 'Trays 11 & 12',
+    cols: [
+      { tray: 11, codes: [1668,1705,1669,1798,1969,1568,1569,1795,1794,1796,1956,1756,1790,1706,1552,1920,1792,1959,1809,1759,1793,1757,1684,1939,1906] },
+      { tray: 12, codes: [1660,1854,1654,1859,1931,1554,1942,1999,1836,1958,1656,1729,1945,1858,1658,1898,1856,1753,1857,1926,1657,1659,1558,1559,1560] }
+    ]
+  },
+  {
+    src: '13-14.jpg', label: 'Trays 13 & 14',
+    cols: [
+      { tray: 13, codes: [1557,1745,1929,1744,1936,1736,1938,1573,1872,1928,1728,1855,1884,1885,1527,1927,1556,1726,1949,1723,1870,1773,1973,1565,1758] },
+      { tray: 14, codes: [1739,1540,1741,1812,1810,1665,1664,1862,1860,1662,1663,1535,1738,1682,1582,1822,1863,1526,1670,1673,1672,1791,1538,1730,1957] }
+    ]
+  },
+  {
+    src: '15-16.jpg', label: 'Trays 15 & 16',
+    cols: [
+      { tray: 15, codes: [1617,1619,1618,1740,1886,1686,1687,1505,1572,1640,1614,1539,1689,1615,1502,1918,1718,1611,1612,1840,1841,1641,1544,1506,1507] },
+      { tray: 16, codes: [1575,1613,1610,1811,1564,1589,1500,1800,2800,1805,1801,1802,1804,1803] }
+    ]
+  }
+];
+
+// Top/bottom fraction of image height where swatches don't appear
+const TOP_FRAC = 0.04;
+const BOT_FRAC = 0.02;
+
+/* ─── LOOKUP DATA ─── */
+const TRAYS = {
+  1500:16,1502:15,1505:15,1506:15,1507:15,1508:4,1509:4,
+  1510:17,1511:17,1512:17,1513:17,1514:17,1515:17,1516:17,
+  1517:17,1518:17,1519:17,1521:2,1522:5,1526:14,1527:13,
+  1528:7,1529:6,1531:7,1532:6,1535:14,1538:14,1539:15,
+  1540:14,1541:10,1542:7,1544:15,1545:10,1548:4,1549:4,
+  1550:7,1552:11,1553:5,1554:12,1555:6,1556:13,1557:13,
+  1558:12,1559:12,1560:12,1561:1,1562:7,1563:8,1564:16,
+  1565:13,1566:6,1567:3,1568:11,1569:11,1572:15,1573:13,
+  1574:6,1575:16,1577:8,1578:10,1580:9,1582:14,1584:4,
+  1588:2,1589:16,1592:9,1593:8,1594:8,1595:20,1596:20,
+  1597:20,1598:20,1599:19,1600:18,1601:18,1602:18,1603:18,
+  1604:18,1605:18,1606:18,1607:18,1608:18,1609:18,1610:16,
+  1611:15,1612:15,1613:16,1614:15,1615:15,1616:3,1617:15,
+  1618:15,1619:15,1620:3,1621:2,1622:1,1623:1,1624:1,
+  1625:1,1626:1,1627:6,1628:7,1629:6,1630:5,1631:5,
+  1632:6,1633:5,1634:5,1635:4,1637:2,1638:3,1639:3,
+  1640:15,1641:15,1642:6,1643:6,1645:9,1647:9,1648:10,
+  1649:10,1650:10,1651:10,1652:9,1653:2,1654:12,1656:12,
+  1657:12,1658:12,1659:12,1660:12,1661:1,1662:14,1663:14,
+  1664:14,1665:14,1666:1,1668:11,1669:11,1670:14,1671:7,
+  1672:14,1673:14,1674:7,1675:7,1676:6,1677:9,1678:2,
+  1680:5,1681:4,1682:14,1683:1,1684:11,1685:9,1686:15,
+  1687:15,1689:15,1690:9,1692:9,1694:8,1695:8,1701:10,
+  1702:10,1703:9,1704:9,1705:11,1706:11,1707:3,1709:5,
+  1710:5,1711:5,1712:5,1713:3,1718:15,1719:5,1720:5,
+  1721:4,1722:5,1723:13,1724:1,1725:1,1726:13,1727:1,
+  1728:13,1729:12,1730:14,1731:5,1733:7,1734:3,1735:1,
+  1736:13,1738:14,1739:14,1740:15,1741:14,1742:7,1743:6,
+  1744:13,1745:13,1746:9,1747:2,1748:10,1749:10,1750:9,
+  1751:9,1752:2,1753:12,1754:3,1755:2,1756:11,1757:11,
+  1758:13,1759:11,1760:8,1761:8,1762:8,1763:1,1764:7,
+  1765:2,1766:6,1767:6,1768:10,1769:10,1770:10,1771:1,
+  1772:1,1773:13,1775:7,1776:7,1777:3,1778:2,1779:3,
+  1780:9,1781:3,1782:4,1783:4,1784:3,1785:4,1786:4,
+  1787:4,1788:5,1789:5,1790:11,1791:14,1792:11,1793:11,
+  1794:11,1795:11,1796:11,1797:8,1798:11,1799:9,1800:16,
+  1801:16,1802:16,1803:16,1804:16,1805:16,1809:11,1810:14,
+  1811:16,1812:14,1815:4,1816:4,1817:2,1818:3,1819:3,
+  1820:2,1821:2,1822:14,1823:19,1824:19,1825:1,1826:2,
+  1827:8,1828:7,1829:7,1830:6,1831:5,1832:5,1833:5,
+  1834:5,1835:4,1836:12,1837:20,1838:2,1839:2,1840:15,
+  1841:15,1842:6,1843:6,1844:6,1845:9,1846:8,1847:9,
+  1848:10,1849:9,1850:19,1851:10,1852:8,1853:2,1854:12,
+  1855:13,1856:12,1857:12,1858:12,1859:12,1860:14,1861:1,
+  1862:14,1863:14,1866:1,1867:19,1868:9,1869:1,1870:13,
+  1871:7,1872:13,1874:7,1878:2,1879:9,1880:5,1882:2,
+  1883:19,1884:13,1885:13,1886:15,1887:3,1888:8,1890:8,
+  1891:8,1892:8,1893:8,1895:8,1896:8,1898:12,1899:2,
+  1900:10,1901:19,1902:10,1903:10,1904:10,1905:10,1906:11,
+  1907:20,1908:20,1909:4,1910:4,1911:5,1915:3,1917:3,
+  1918:15,1919:3,1920:11,1921:4,1922:5,1923:2,1924:1,
+  1925:19,1926:12,1927:13,1928:13,1929:13,1930:6,1931:12,
+  1932:8,1933:5,1934:7,1935:19,1936:13,1937:20,1938:13,
+  1939:11,1940:10,1941:3,1942:12,1943:6,1944:6,1945:12,
+  1946:20,1947:20,1948:4,1949:13,1950:19,1951:1,1952:2,
+  1953:7,1954:20,1955:1,1956:11,1957:14,1958:12,1959:11,
+  1960:7,1961:7,1962:8,1963:7,1964:7,1965:2,1966:6,
+  1967:6,1968:10,1969:11,1970:10,1971:1,1972:19,1973:13,
+  1974:3,1975:7,1976:6,1977:8,1978:20,1979:9,1980:1,
+  1981:3,1982:3,1983:3,1984:4,1985:9,1986:4,1987:2,
+  1988:10,1989:9,1990:4,1991:8,1992:8,1993:4,1994:4,
+  1995:19,1996:9,1997:6,1998:3,1999:12,2800:16
+};
+
+const NAMES = {
+  1610:"Celestial Blue",1611:"Highrise",1612:"Blue Fog",1613:"Platinum",
+  1614:"Medium Grey",1615:"Metal",1616:"Shell Pink",1617:"Gray Ridge",
+  1618:"Silver Rose",1619:"Gray Ridge",1620:"Azalea",1621:"Old Dark Tex Orange",
+  1622:"Tusk",1623:"Copper",1624:"Gold",1625:"Copper",1626:"Sunset Gold",
+  1627:"Purple Ash",1628:"Pale Purple",1629:"Paris Blue",1630:"Violet Tulip",
+  1631:"Laurie Lilac",1632:"Fleet Blue",1633:"Dark Purple",1634:"Purple Accent",
+  1635:"Dark Maroon",1637:"Warm Red",1638:"Cherry Jubilee",1639:"Red Berry",
+  1640:"Twilight",1641:"Black",1642:"Blue",1643:"Navy",1645:"Seafrost",
+  1647:"Cameo Green",1648:"Sage Green",1649:"Meadow",1650:"Medium Green",
+  1651:"Kelly",1652:"Deep Atlantic",1653:"Peach",1654:"Twilight Mauve",
+  1656:"Light Red / Orange",1657:"Light Cocoa",1658:"Brown",1659:"Dark Oak",
+  1660:"Light Brown",1661:"Celery",1662:"Atmosphere",1663:"Cinder",
+  1664:"Black Chrome",1665:"Charcoal Gray",1666:"Wheat",1668:"Water Lilly",
+  1669:"Dark Army Green",1670:"Old Gold",1671:"Slate Blue",1672:"Shimmering Gold",
+  1673:"Beige",1674:"Angel Falls",1675:"Caribbean Blue",1676:"Royal",
+  1677:"Deep Windsor",1678:"Fluorescent Orange",1680:"Port Wine",1681:"Atom Red",
+  1682:"Taupe",1683:"Buttercup",1684:"Warm Sand",1685:"J. Turquoise",
+  1686:"Gray Lilac",1687:"Vapor",1689:"Gull",1690:"Dark Blue",1692:"Pale Blue",
+  1694:"Marine Aqua",1695:"Dark Blue",1701:"Absinthe Green",1702:"Meadow",
+  1703:"Dark Green",1704:"Evergreen",1705:"Dark Army",1706:"Cypress",
+  1707:"Dusky Rose",1709:"Passion",1710:"Dark Red",1711:"Wisteria",
+  1712:"Smoky Grape",1713:"Petal Pink",1718:"Highrise",1719:"Plum Wine",
+  1720:"Dark Purple",1721:"Begonia",1722:"Purple Maze",1723:"Impala",
+  1724:"Pollen Gold",1725:"Old Gold",1726:"Sirocco",1727:"Mimosa",
+  1728:"Fawn",1729:"Fawn",1730:"Sand Dune",1731:"Very Grape",1733:"Violet",
+  1734:"Desert Rose",1735:"Lemon",1736:"Medium Green / Yellow",1738:"Pistachio",
+  1739:"Dark Grey",1740:"Silver Rose",1741:"Gull",1742:"Blue Ribbon",
+  1743:"Light Navy",1744:"Egyptian Brown",1745:"Fungi",1746:"Nile Blue",
+  1747:"Very Red",1748:"Spruce",1749:"Medium Green",1750:"Dark Green",
+  1751:"Vibrant Green",1752:"Coral Reef",1753:"Date",1754:"Spanish Red",
+  1755:"Marigold",1756:"Green",1757:"Dark Green / Yellow",1758:"Dark Brown",
+  1759:"Foliage Green",1760:"Medium Green / Blue",1761:"Stone Blue",
+  1762:"Deep Windsor",1763:"Karat",1764:"Blue Ribbon",1765:"Pumpkin",
+  1766:"Violet Blue",1767:"Royal",1768:"Celadon Green",1769:"Pale Green",
+  1770:"Green",1771:"Gold",1772:"Old Gold",1773:"Almond",1775:"Lake Blue",
+  1776:"Blue",1777:"Coral",1778:"Orange",1779:"Honeysuckle",1780:"Green Forest",
+  1781:"Burgundy",1782:"Red Jubilee",1783:"Red Licorice",1784:"Wine",
+  1785:"Grape Shake",1786:"Candy Apple Red",1787:"Cherrystone",
+  1788:"Dark Purple",1789:"Medium Purple",1790:"Palmetto",1791:"Earthen Tan",
+  1792:"Autumn Green",1793:"Sand Dune",1794:"Dark Olive Green",1795:"D. H. Green",
+  1796:"Khaki",1797:"Solar Blue",1798:"Charcoal Gray",1799:"M. D. Green",
+  1800:"Black",1801:"Super White",1802:"Snow White",1803:"Creme White",
+  1804:"Natural White",1805:"Fluoresc. White",1809:"Hemp",1810:"Pale Grey",
+  1811:"Traditional Gray",1812:"Vapor Blue",1815:"Pink",1816:"Dusty Rose",
+  1817:"Flamingo",1818:"Crystal Pink",1819:"Shell Pink",1820:"Flamingo",
+  1821:"Red Bittersweet",1822:"Seashell",1823:"Yellow",1824:"Canary",
+  1825:"Gold",1826:"Honey",1827:"Medium Blue",1828:"Pale Purple",
+  1829:"Fire Blue",1830:"Jay Blue",1831:"Medium Purple",1832:"Purple Shadow",
+  1833:"Dark Purple",1834:"Iris",1835:"Perfect Ruby",1836:"Brown Stone",
+  1837:"Fluo Pink",1838:"Foxy Red",1839:"Lipstick",1840:"Wild Dove",
+  1841:"Midnight",1842:"Fire Blue",1843:"Royal Blue",1844:"Smokey",
+  1845:"Neptune Green",1846:"J. Turquoise",1847:"Isle Green",1848:"Meadow",
+  1849:"Green Bay",1850:"Green",1851:"Fleece Green",1852:"Faded Denim",
+  1853:"Bamboo",1854:"Twilight Mauve",1855:"Wicker",1856:"Chocolate",
+  1857:"Mushroom",1858:"Mink Brown",1859:"Brown Mule",1860:"String",
+  1861:"Cornsilk",1862:"Vertiver Green",1863:"Cocoa Mulch",1866:"Pale Yellow",
+  1867:"Applegreen",1868:"Jungle Green",1869:"Golden Earth",1870:"Chamois",
+  1871:"Sky Blue",1872:"Antler",1874:"Baby Blue",1878:"Saffron",
+  1879:"Green Forest",1880:"Dark Purple",1882:"Tawny",1883:"Canary",
+  1884:"Rattan",1885:"Tawny Birch",1886:"Stainless Steel",1887:"Shark",
+  1888:"Marine Blue",1890:"Mallard Blue",1891:"Deep Windsor",1892:"Turquoise",
+  1893:"Surf Blue",1895:"Dark Aqua Green",1896:"Dark Blue",1898:"Desert Sand",
+  1899:"Red Bittersweet",1900:"Nile",1901:"Emerald",1902:"Mitchell Green",
+  1903:"Evergreen",1904:"Chinois Green",1905:"Mitchell Green",
+  1906:"Dark Olive Green",1907:"Fluorescent Red",1908:"Dark Fluo Pink",
+  1909:"Dark Pink",1910:"Strawberry",1911:"Light Pink",1915:"Emily Pink",
+  1917:"Rapture Rose",1918:"Limestone",1919:"Maroon",1920:"Cocoon",
+  1921:"Wild Pink",1922:"Purple Accent",1923:"Merit Gold",1924:"Moonbeam",
+  1925:"Merit Gold",1926:"Tawny Birch",1927:"Gold",1928:"Moon Rock",
+  1929:"Best Brown",1930:"Violet Blue",1931:"Dark Grey",1932:"Pale Blue",
+  1933:"Light Purple",1934:"Light Blue / Green",1935:"Lemon",1936:"Dark Grey",
+  1937:"Orange",1938:"Mushroom",1939:"Nouget",1940:"Fluo Orange",
+  1941:"Light Pink",1942:"Brown",1943:"Violet",1944:"Blue Ribbon",
+  1945:"Brown",1946:"Neon Orange",1947:"Red",1948:"Azalea",
+  1949:"Moonbeam",1950:"Green",1951:"Honeydew",1952:"Coral",
+  1953:"Sky Blue",1954:"Bitteroot",1955:"Honeydew",1956:"Olive Green",
+  1957:"Best Brown",1958:"Coffee Bean",1959:"Shimmering Gold",
+  1960:"Country Blue",1961:"Tempest",1962:"Dark Blue",1963:"Purple Sage",
+  1964:"Ash",1965:"Orange",1966:"Light Navy",1967:"Light Navy",
+  1968:"Fair Green",1969:"Hedge",1970:"Evergreen",1971:"Manila",
+  1972:"Merit Gold",1973:"Chocolate",1974:"Burgundy",1975:"Blue",
+  1976:"Cadet",1977:"Dark Turquoise Blue",1978:"Orange",1979:"Frosty Spruce",
+  1980:"Manila",1981:"Wine",1982:"Burgundy",1983:"Plum",1984:"Ruby Glint",
+  1985:"Green",1986:"Candy Apple Red",1987:"Fluorescent Orange",1988:"Kelly",
+  1989:"Irish Green",1990:"Ruby Glint",1991:"Blue / Green",1992:"Peacock",
+  1993:"Cerise",1994:"Bashful Pink",1995:"Bright Yellow",1996:"Green Sail",
+  1997:"Black",1998:"Elderberry",1999:"Dark Brown",2800:"Tunnel Dry Finisher"
+};
+
+const COLORS = {
+  1610:[183,195,197],1611:[158,169,177],1612:[151,166,180],1613:[147,158,158],
+  1614:[99,103,103],1615:[112,118,118],1616:[225,114,116],1617:[90,86,96],
+  1618:[113,115,126],1619:[99,101,108],1620:[252,140,151],1621:[196,86,45],
+  1622:[238,223,188],1623:[245,225,84],1624:[244,167,49],1625:[195,127,41],
+  1626:[248,197,120],1627:[121,117,139],1628:[126,168,192],1629:[194,199,218],
+  1630:[148,145,186],1631:[141,103,157],1632:[64,53,79],1633:[93,42,101],
+  1634:[64,52,90],1635:[108,47,65],1637:[188,33,48],1638:[133,45,50],
+  1639:[173,62,65],1640:[94,97,98],1641:[53,57,61],1642:[41,90,148],
+  1643:[45,53,65],1645:[119,199,187],1647:[136,186,156],1648:[137,155,99],
+  1649:[116,149,43],1650:[54,121,54],1651:[0,132,69],1652:[59,121,122],
+  1653:[240,188,169],1654:[102,79,76],1656:[191,154,136],1657:[135,91,67],
+  1658:[121,70,57],1659:[82,56,52],1660:[177,164,160],1661:[241,235,202],
+  1662:[139,132,118],1663:[110,99,85],1664:[97,93,86],1665:[73,73,67],
+  1666:[244,229,179],1668:[100,118,106],1669:[65,76,66],1670:[213,167,104],
+  1671:[91,133,162],1672:[167,121,62],1673:[173,142,94],1674:[141,188,220],
+  1675:[122,174,213],1676:[46,75,134],1677:[0,77,81],1678:[237,85,46],
+  1680:[92,60,91],1681:[189,55,85],1682:[205,191,172],1683:[255,197,86],
+  1684:[190,162,115],1685:[0,134,129],1686:[210,211,210],1687:[189,197,195],
+  1689:[108,110,108],1690:[23,76,75],1692:[158,199,195],1694:[0,160,174],
+  1695:[0,137,163],1701:[72,159,48],1702:[104,186,132],1703:[10,93,66],
+  1704:[26,74,63],1705:[55,61,50],1706:[148,137,73],1707:[197,74,91],
+  1709:[206,56,147],1710:[150,48,113],1711:[161,140,177],1712:[170,122,166],
+  1713:[244,203,205],1718:[145,155,162],1719:[110,62,101],1720:[108,56,91],
+  1721:[235,100,146],1722:[67,55,123],1723:[246,209,168],1724:[222,173,57],
+  1725:[202,140,63],1726:[181,128,90],1727:[237,212,117],1728:[152,128,106],
+  1729:[150,123,108],1730:[125,92,57],1731:[158,125,146],1733:[59,123,176],
+  1734:[228,53,70],1735:[242,210,98],1736:[145,133,122],1738:[197,183,156],
+  1739:[78,74,74],1740:[123,120,125],1741:[116,117,115],1742:[34,61,92],
+  1743:[47,55,92],1744:[104,87,76],1745:[118,93,83],1746:[40,163,157],
+  1747:[164,30,53],1748:[169,221,118],1749:[55,163,70],1750:[0,113,74],
+  1751:[0,124,73],1752:[248,172,136],1753:[184,107,69],1754:[216,58,74],
+  1755:[247,143,71],1756:[91,90,47],1757:[99,82,47],1758:[110,74,53],
+  1759:[150,125,57],1760:[74,112,127],1761:[136,166,180],1762:[19,83,104],
+  1763:[221,123,42],1764:[44,72,93],1765:[237,112,31],1766:[53,59,26],
+  1767:[38,61,118],1768:[169,184,130],1769:[92,119,44],1770:[70,113,62],
+  1771:[224,162,66],1772:[216,150,37],1773:[176,102,50],1775:[63,123,157],
+  1776:[28,78,104],1777:[239,135,126],1778:[231,95,62],1779:[226,62,40],
+  1780:[0,104,82],1781:[153,30,58],1782:[133,52,72],1783:[133,44,88],
+  1784:[117,44,58],1785:[104,43,68],1786:[176,46,84],1787:[181,50,108],
+  1788:[119,50,105],1789:[100,62,88],1790:[126,111,49],1791:[175,121,64],
+  1792:[178,136,54],1793:[117,96,47],1794:[86,77,48],1795:[73,71,53],
+  1796:[95,87,47],1797:[0,105,155],1798:[63,64,52],1799:[0,176,158],
+  1800:[47,48,50],1801:[228,232,255],1802:[236,237,255],1803:[237,236,223],
+  1804:[236,236,230],1805:[221,225,255],1809:[182,161,85],1810:[173,176,174],
+  1811:[169,176,177],1812:[169,170,164],1815:[252,190,210],1816:[253,175,192],
+  1817:[246,166,150],1818:[228,189,185],1819:[251,159,157],1820:[245,148,130],
+  1821:[164,59,52],1822:[226,220,197],1823:[249,255,0],1824:[255,221,0],
+  1825:[249,178,0],1826:[255,198,124],1827:[85,185,214],1828:[65,139,174],
+  1829:[0,102,160],1830:[101,134,188],1831:[154,100,156],1832:[106,85,149],
+  1833:[119,45,115],1834:[150,122,162],1835:[134,49,73],1836:[76,55,56],
+  1837:[255,62,38],1838:[180,34,50],1839:[173,29,49],1840:[116,125,135],
+  1841:[79,86,92],1842:[0,85,149],1843:[15,70,120],1844:[49,51,62],
+  1845:[109,195,159],1846:[0,146,144],1847:[66,171,146],1848:[117,159,86],
+  1849:[33,123,104],1850:[92,202,75],1851:[0,94,56],1852:[50,124,146],
+  1853:[239,188,154],1854:[156,132,128],1855:[179,147,113],1856:[159,85,57],
+  1857:[137,82,53],1858:[101,55,48],1859:[75,63,62],1860:[176,166,151],
+  1861:[240,203,123],1862:[148,143,131],1863:[219,210,177],1866:[240,221,145],
+  1867:[228,255,130],1868:[0,147,109],1869:[221,136,58],1870:[235,166,109],
+  1871:[120,172,200],1872:[99,81,66],1874:[144,179,216],1878:[200,47,43],
+  1879:[0,120,101],1880:[120,63,132],1882:[249,197,173],1883:[255,249,0],
+  1884:[197,169,141],1885:[160,126,97],1886:[191,185,186],1887:[70,47,57],
+  1888:[0,161,163],1890:[0,124,128],1891:[0,85,97],1892:[120,200,204],
+  1893:[46,173,201],1895:[0,148,170],1896:[0,112,136],1898:[157,75,56],
+  1899:[135,59,49],1900:[154,186,155],1901:[96,171,39],1902:[45,74,56],
+  1903:[58,89,78],1904:[71,91,74],1905:[59,74,55],1906:[106,86,63],
+  1907:[255,61,103],1908:[255,67,104],1909:[255,103,144],1910:[214,36,94],
+  1911:[203,173,207],1915:[253,175,183],1917:[203,115,135],1918:[138,139,142],
+  1919:[160,85,102],1920:[206,196,137],1921:[243,147,184],1922:[77,50,117],
+  1923:[255,187,84],1924:[251,212,0],1925:[255,216,43],1926:[174,132,108],
+  1927:[220,177,146],1928:[141,119,101],1929:[105,91,83],1930:[74,81,145],
+  1931:[64,58,60],1932:[124,197,220],1933:[121,128,175],1934:[0,93,153],
+  1935:[232,255,0],1936:[125,111,98],1937:[255,171,0],1938:[185,169,153],
+  1939:[160,138,96],1940:[204,203,76],1941:[188,139,143],1942:[143,86,83],
+  1943:[91,112,172],1944:[46,60,74],1945:[114,79,70],1946:[255,97,21],
+  1947:[255,73,67],1948:[253,139,165],1949:[240,231,212],1950:[118,214,56],
+  1951:[246,153,42],1952:[251,123,98],1953:[162,196,220],1954:[255,73,81],
+  1955:[243,139,28],1956:[139,128,85],1957:[74,64,50],1958:[112,73,74],
+  1959:[167,137,21],1960:[115,140,158],1961:[79,109,131],1962:[37,69,83],
+  1963:[75,87,109],1964:[72,91,114],1965:[249,103,34],1966:[41,52,81],
+  1967:[35,57,87],1968:[107,150,89],1969:[108,108,88],1970:[52,92,62],
+  1971:[249,179,36],1972:[255,187,0],1973:[147,93,52],1974:[138,63,64],
+  1975:[40,85,120],1976:[44,54,70],1977:[0,129,175],1978:[255,132,66],
+  1979:[0,95,67],1980:[251,193,26],1981:[135,42,57],1982:[127,37,49],
+  1983:[78,52,67],1984:[181,41,98],1985:[0,91,79],1986:[171,34,69],
+  1987:[228,60,34],1988:[0,140,67],1989:[0,154,103],1990:[216,95,149],
+  1991:[0,115,121],1992:[0,95,118],1993:[215,49,92],1994:[235,77,112],
+  1995:[255,255,0],1996:[42,66,64],1997:[59,48,61],1998:[126,96,100],
+  1999:[102,49,49]
+};
+
+/* ─── UTILITIES ─── */
+function luminance(r, g, b) {
+  return [r,g,b].reduce((a,c,i) => {
+    c /= 255;
+    c = c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+    return a + c * [0.2126,0.7152,0.0722][i];
+  }, 0);
+}
+function textColor(r, g, b) {
+  return luminance(r,g,b) > 0.33 ? '#1C1A18' : '#ffffff';
+}
+
+/* ─── BUILD CAROUSEL ─── */
+const carousel = document.getElementById('carousel');
+
+CATALOG.forEach((spread, idx) => {
+  const card = document.createElement('div');
+  card.className = 'catalog-card';
+
+  const label = document.createElement('div');
+  label.className = 'card-label';
+  label.textContent = spread.label;
+
+  const img = document.createElement('img');
+  img.className = 'card-img';
+  img.src = spread.src;
+  img.alt = spread.label;
+  img.loading = 'lazy';
+
+  card.appendChild(label);
+  card.appendChild(img);
+  card.addEventListener('click', () => openFullscreen(idx));
+  carousel.appendChild(card);
+});
+
+/* ─── FULLSCREEN ─── */
+const fsOverlay = document.getElementById('fs-overlay');
+const fsImg     = document.getElementById('fs-img');
+const fsTitle   = document.getElementById('fs-title');
+
+let currentSpread = null;
+
+function openFullscreen(idx) {
+  currentSpread = CATALOG[idx];
+  fsImg.src = currentSpread.src;
+  fsTitle.textContent = currentSpread.label;
+  fsOverlay.classList.add('open');
+}
+
+function closeFullscreen() {
+  fsOverlay.classList.remove('open');
+  hideToast();
+}
+
+document.getElementById('fs-close').addEventListener('click', closeFullscreen);
+
+fsImg.addEventListener('click', handleImageTap);
+
+function handleImageTap(e) {
+  if (!currentSpread) return;
+  e.stopPropagation();
+
+  // Get the actual rendered image bounds (accounts for object-fit: contain letterboxing)
+  const wrap    = document.getElementById('fs-image-wrap');
+  const wRect   = wrap.getBoundingClientRect();
+  const natW    = fsImg.naturalWidth  || 1;
+  const natH    = fsImg.naturalHeight || 1;
+  const natAR   = natW / natH;
+  const boxAR   = wRect.width / wRect.height;
+
+  let imgLeft, imgTop, imgW, imgH;
+  if (natAR > boxAR) {
+    // Width-constrained
+    imgW    = wRect.width;
+    imgH    = wRect.width / natAR;
+    imgLeft = wRect.left;
+    imgTop  = wRect.top + (wRect.height - imgH) / 2;
+  } else {
+    // Height-constrained
+    imgH    = wRect.height;
+    imgW    = wRect.height * natAR;
+    imgTop  = wRect.top;
+    imgLeft = wRect.left + (wRect.width - imgW) / 2;
+  }
+
+  const relX = (e.clientX - imgLeft) / imgW;
+  const relY = (e.clientY - imgTop)  / imgH;
+
+  // Guard: tap was outside image area
+  if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return;
+
+  // Which column?
+  const colIdx = relX < 0.5 ? 0 : 1;
+  const col = currentSpread.cols[colIdx];
+
+  // Map Y to swatch index
+  const activeFrac = 1 - TOP_FRAC - BOT_FRAC;
+  const swatchY    = (relY - TOP_FRAC) / activeFrac;
+  const rawIdx     = Math.floor(swatchY * col.codes.length);
+  const swatchIdx  = Math.max(0, Math.min(col.codes.length - 1, rawIdx));
+
+  const code = col.codes[swatchIdx];
+  const tray = col.tray;
+  const name = NAMES[code] || '';
+
+  showToast(code, tray, name);
+}
+
+/* ─── TOAST ─── */
+let toastTimer = null;
+const toast     = document.getElementById('toast');
+const toastCode = document.getElementById('toast-code');
+const toastTray = document.getElementById('toast-tray');
+const toastName = document.getElementById('toast-name');
+
+function showToast(code, tray, name) {
+  toastCode.textContent = `#${code}`;
+  toastTray.textContent = tray;
+  toastName.textContent = name;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 3000);
+}
+
+function hideToast() {
+  toast.classList.remove('show');
+}
+
+/* ─── TABS ─── */
+let activeTab = 'lookup';
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    if (tab === activeTab) return;
+    activeTab = tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
+
+    if (tab === 'lookup') {
+      // Restore lookup bg if a color is active
+      if (activeLookupColor) applyLookupBg(activeLookupColor);
+      setTimeout(() => document.getElementById('colorInput').focus(), 100);
+    } else {
+      resetBg();
+    }
+  });
+});
+
+/* ─── LOOKUP ─── */
+let activeLookupColor = null;
+
+function applyLookupBg(rgb) {
+  activeLookupColor = rgb;
+  if (activeTab !== 'lookup') return;
+  if (rgb) {
+    const [r, g, b] = rgb;
+    const tc = textColor(r, g, b);
+    document.body.style.backgroundColor = `rgb(${r},${g},${b})`;
+    document.body.style.color = tc;
+    document.getElementById('tab-bar').style.backgroundColor = `rgba(${r},${g},${b},0.72)`;
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.style.color = tc === '#ffffff'
+        ? (btn.classList.contains('active') ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.45)')
+        : (btn.classList.contains('active') ? 'rgba(28,26,24,0.95)' : 'rgba(28,26,24,0.42)');
+    });
+  } else { resetBg(); }
+}
+
+function resetBg() {
+  document.body.style.backgroundColor = '';
+  document.body.style.color = '';
+  document.getElementById('tab-bar').style.backgroundColor = '';
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.style.color = '');
+}
+
+const input    = document.getElementById('colorInput');
+const resultEl = document.getElementById('lookup-result');
+
+input.addEventListener('input', () => {
+  const raw  = input.value.trim();
+  const code = parseInt(raw, 10);
+
+  if (raw.length < 4) {
+    resultEl.innerHTML = '';
+    applyLookupBg(null);
+    return;
+  }
+
+  if (TRAYS.hasOwnProperty(code)) {
+    const tray = TRAYS[code];
+    const rgb  = COLORS[code];
+    const name = NAMES[code];
+
+    if (rgb) {
+      applyLookupBg(rgb);
+      resultEl.innerHTML = `
+        <div class="res-label">Tray</div>
+        <div class="res-tray">${tray}</div>
+        ${name ? `<div class="res-name">${name}</div>` : ''}
+      `;
+    } else {
+      applyLookupBg(null);
+      resultEl.innerHTML = `
+        <div class="res-label">Tray</div>
+        <div class="res-tray">${tray}</div>
+        <div class="res-nocolor">No color preview for this code</div>
+      `;
+    }
+  } else {
+    applyLookupBg(null);
+    resultEl.innerHTML = `<div class="res-notfound">Color ${code} not found</div>`;
+  }
+});
+</script>
+</body>
+</html>
